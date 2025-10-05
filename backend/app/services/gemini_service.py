@@ -5,6 +5,7 @@ Ported from CLI script with additional logging
 import os
 import mimetypes
 import time
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from google import genai
 from app.models.receipt import Receipt
@@ -138,17 +139,31 @@ Categorize each item into one of these categories: {categories_str}"""
             generation_start = time.time()
             contents = [base_prompt] + file_objects
 
-            response = self.client.models.generate_content(
-                model=self.model_id,
-                contents=contents,
-                config={
-                    "response_mime_type": "application/json",
-                    "response_schema": Receipt,
-                    "temperature": 0.1,
-                    "top_p": 0.8,
-                    "top_k": 20,
-                },
-            )
+            print(f"🚀 Calling Gemini API with {len(file_objects)} file(s)...")
+            print(f"📝 Model: {self.model_id}")
+            import sys
+            sys.stdout.flush()  # Force flush to ensure log appears
+
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model_id,
+                    contents=contents,
+                    config={
+                        "response_mime_type": "application/json",
+                        "response_schema": Receipt,
+                        "temperature": 0.1,
+                        "top_p": 0.8,
+                        "top_k": 20,
+                    },
+                )
+                print(f"✅ Gemini API call completed")
+                sys.stdout.flush()
+            except Exception as api_error:
+                print(f"❌ Gemini API call failed: {api_error}")
+                import traceback
+                traceback.print_exc()
+                sys.stdout.flush()
+                raise
 
             generation_time = time.time() - generation_start
             extraction_log["timings"]["generation"] = generation_time
@@ -312,17 +327,30 @@ Return the updated receipt data in the same JSON format."""
                 )
             else:
                 # For initial extraction or reprocessing without current data, use image
-                response = self.client.models.generate_content(
-                    model=self.model_id,
-                    contents=[base_prompt, file_obj],
-                    config={
-                        "response_mime_type": "application/json",
-                        "response_schema": Receipt,
-                        "temperature": 0.1,
-                        "top_p": 0.8,
-                        "top_k": 20,
-                    },
-                )
+                print(f"🚀 Calling Gemini API with image...")
+                import sys
+                sys.stdout.flush()
+
+                try:
+                    response = self.client.models.generate_content(
+                        model=self.model_id,
+                        contents=[base_prompt, file_obj],
+                        config={
+                            "response_mime_type": "application/json",
+                            "response_schema": Receipt,
+                            "temperature": 0.1,
+                            "top_p": 0.8,
+                            "top_k": 20,
+                        },
+                    )
+                    print(f"✅ Gemini API call completed")
+                    sys.stdout.flush()
+                except Exception as api_error:
+                    print(f"❌ Gemini API call failed: {api_error}")
+                    import traceback
+                    traceback.print_exc()
+                    sys.stdout.flush()
+                    raise
 
             generation_time = time.time() - generation_start
             extraction_log["timings"]["generation"] = generation_time
@@ -403,3 +431,114 @@ Return ONLY the category name, nothing else."""
         except Exception as e:
             print(f"Error categorizing item: {e}")
             return "Other"
+
+    def extract_expense_from_text(
+        self, text: str, custom_categories: Optional[list[str]] = None
+    ) -> tuple[Optional[Receipt], Dict[str, Any]]:
+        """
+        Extract structured expense data from natural language text
+
+        Args:
+            text: Natural language expense description
+            custom_categories: User's custom categories
+
+        Returns:
+            Tuple of (Receipt object, extraction log dict)
+
+        Examples:
+            "Spent $45 on groceries at Whole Foods yesterday"
+            "Coffee $5.50 at Starbucks this morning"
+            "Uber ride $23.45 last night with credit card"
+        """
+        from app.utils.date_parser import parse_relative_date, extract_amount
+
+        extraction_log = {
+            "prompt": "",
+            "response": "",
+            "error": None,
+            "success": False,
+            "timings": {},
+            "input_text": text
+        }
+
+        start_time = time.time()
+
+        try:
+            print(f"🤖 Extracting expense from text: {text[:100]}...")
+
+            # Get categories
+            categories_list = custom_categories if custom_categories else [
+                "Groceries", "Dining", "Transport", "Utilities", "Entertainment",
+                "Shopping", "Health", "Other", "Produce", "Bakery", "Meat"
+            ]
+            categories_str = ", ".join(categories_list)
+
+            # Parse date from text
+            parsed_date = parse_relative_date(text)
+
+            # Build prompt
+            prompt = f"""Extract expense information from this text: "{text}"
+
+Parse and extract:
+1. Merchant name (if mentioned, otherwise use category or "Manual Entry")
+2. Purchase date - IMPORTANT: The text mentions a relative date. Convert it to DD-MM-YYYY format. Today is {datetime.now().strftime('%d-%m-%Y')}
+3. Total amount (extract the main amount mentioned)
+4. Items purchased (if multiple items mentioned, list them separately)
+5. Category - choose from: {categories_str}
+6. Payment method (if mentioned: Cash, Credit Card, Debit Card, Digital Wallet, etc.)
+
+Guidelines:
+- If date is "today", "this morning", use today's date: {datetime.now().strftime('%d-%m-%Y')}
+- If date is "yesterday", "last night", use: {(datetime.now() - timedelta(days=1)).strftime('%d-%m-%Y')}
+- Infer category from context if not explicitly mentioned
+- If multiple items mentioned with prices, create separate line items
+- Default payment method to "Other" if not specified
+- Set merchant address to empty string if not provided
+
+Return structured receipt data."""
+
+            extraction_log["prompt"] = prompt
+
+            generation_start = time.time()
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=[prompt],
+                config={
+                    "response_mime_type": "application/json",
+                    "response_schema": Receipt,
+                    "temperature": 0.2,  # Slightly higher for better inference
+                    "top_p": 0.9,
+                    "top_k": 40,
+                },
+            )
+
+            generation_time = time.time() - generation_start
+            extraction_log["timings"]["generation"] = generation_time
+            print(f"🤖 AI generation took {generation_time:.2f}s")
+
+            extraction_log["response"] = str(response.text)
+
+            if response.parsed:
+                receipt = Receipt.model_validate(response.parsed)
+
+                # Override date with parsed date if AI didn't get it right
+                if receipt.purchase_date != parsed_date:
+                    print(f"📅 Overriding AI date {receipt.purchase_date} with parsed date {parsed_date}")
+                    receipt.purchase_date = parsed_date
+
+                extraction_log["success"] = True
+                total_time = time.time() - start_time
+                extraction_log["timings"]["total"] = total_time
+                print(f"✅ Total extraction time: {total_time:.2f}s")
+                print(f"📊 Extracted: {receipt.merchant_details.name}, ${receipt.total_amounts.total}, {receipt.purchase_date}")
+
+                return receipt, extraction_log
+            else:
+                extraction_log["error"] = "No data extracted from text"
+                return None, extraction_log
+
+        except Exception as e:
+            extraction_log["error"] = str(e)
+            extraction_log["timings"]["total"] = time.time() - start_time
+            print(f"❌ Error extracting expense from text: {e}")
+            return None, extraction_log

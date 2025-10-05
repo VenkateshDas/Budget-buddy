@@ -62,8 +62,30 @@ export default function ReceiptHistory() {
   };
 
   const handleReceiptClick = (receipt: UploadJobStatus) => {
-    if (receipt.status === UploadStatus.COMPLETED) {
+    // Don't navigate if clicking on saved receipts
+    if (receipt.status === UploadStatus.COMPLETED && !receipt.is_saved) {
       router.push(`/confirm/${receipt.receipt_id}`);
+    }
+  };
+
+  const handleDeleteReceipt = async (receipt: UploadJobStatus, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent navigation when deleting
+
+    const confirmMessage = receipt.is_saved
+      ? 'Are you sure you want to delete this saved receipt? This will remove it from Google Sheets.'
+      : 'Are you sure you want to remove this receipt from the queue?';
+
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    try {
+      await receiptApi.delete(receipt.receipt_id);
+      // Refresh the list
+      fetchReceipts();
+    } catch (error) {
+      console.error('Failed to delete receipt:', error);
+      alert('Failed to delete receipt. Please try again.');
     }
   };
 
@@ -80,8 +102,8 @@ export default function ReceiptHistory() {
       <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-200">
         <div className="text-center">
           <div className="text-4xl mb-3">📋</div>
-          <p className="text-gray-600">No receipts yet</p>
-          <p className="text-sm text-gray-500 mt-2">Upload your first receipt to get started</p>
+          <p className="text-gray-600">No transactions yet</p>
+          <p className="text-sm text-gray-500 mt-2">Upload your first receipt or add a text expense to get started</p>
         </div>
       </div>
     );
@@ -90,9 +112,9 @@ export default function ReceiptHistory() {
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200">
       <div className="p-6 border-b border-gray-200">
-        <h2 className="text-xl font-bold text-gray-900">Receipt History</h2>
+        <h2 className="text-xl font-bold text-gray-900">Transaction History</h2>
         <p className="text-sm text-gray-600 mt-1">
-          {receipts.length} receipt{receipts.length !== 1 ? 's' : ''} total
+          Recent uploads and saved transactions (last 10)
         </p>
       </div>
 
@@ -102,12 +124,12 @@ export default function ReceiptHistory() {
             key={receipt.receipt_id}
             onClick={() => handleReceiptClick(receipt)}
             className={`p-4 hover:bg-gray-50 transition ${
-              receipt.status === UploadStatus.COMPLETED ? 'cursor-pointer' : 'cursor-default'
+              receipt.status === UploadStatus.COMPLETED && !receipt.is_saved ? 'cursor-pointer' : 'cursor-default'
             }`}
           >
-            <div className="flex items-start justify-between">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
                   <span
                     className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(
                       receipt.status
@@ -115,6 +137,11 @@ export default function ReceiptHistory() {
                   >
                     {getStatusIcon(receipt.status)} {receipt.status}
                   </span>
+                  {receipt.is_saved && (
+                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                      💾 Saved
+                    </span>
+                  )}
                   {receipt.status === UploadStatus.PROCESSING && (
                     <div className="flex items-center gap-2 text-sm text-gray-600">
                       <div className="w-24 bg-gray-200 rounded-full h-2">
@@ -133,16 +160,18 @@ export default function ReceiptHistory() {
                     <h3 className="font-semibold text-gray-900">
                       {receipt.receipt_data.merchant_details?.name || 'Unknown Merchant'}
                     </h3>
-                    <div className="flex items-center gap-4 mt-1 text-sm text-gray-600">
+                    <div className="flex items-center gap-4 mt-1 text-sm text-gray-600 flex-wrap">
                       <span>
                         📅 {receipt.receipt_data.purchase_date || 'No date'}
                       </span>
                       <span>
                         💰 ${receipt.receipt_data.total_amounts?.total?.toFixed(2) || '0.00'}
                       </span>
-                      <span>
-                        🛒 {receipt.receipt_data.line_items?.length || 0} items
-                      </span>
+                      {receipt.receipt_data.line_items && receipt.receipt_data.line_items.length > 0 && (
+                        <span>
+                          🛒 {receipt.receipt_data.line_items.length} items
+                        </span>
+                      )}
                     </div>
                   </>
                 )}
@@ -156,8 +185,29 @@ export default function ReceiptHistory() {
                 )}
               </div>
 
-              {receipt.status === UploadStatus.COMPLETED && (
-                <div className="text-blue-600">
+              <div className="flex items-center gap-2">
+                {receipt.status === UploadStatus.COMPLETED && !receipt.is_saved && (
+                  <div className="text-blue-600">
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
+                  </div>
+                )}
+                <button
+                  onClick={(e) => handleDeleteReceipt(receipt, e)}
+                  className="text-red-600 hover:text-red-800 hover:bg-red-50 p-2 rounded-lg transition"
+                  title="Delete receipt"
+                >
                   <svg
                     className="w-5 h-5"
                     fill="none"
@@ -168,11 +218,11 @@ export default function ReceiptHistory() {
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       strokeWidth={2}
-                      d="M9 5l7 7-7 7"
+                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
                     />
                   </svg>
-                </div>
-              )}
+                </button>
+              </div>
             </div>
           </div>
         ))}

@@ -295,9 +295,32 @@ export default function ReceiptConfirmation({
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [loadingImages, setLoadingImages] = useState(true);
+  const [isTextInput, setIsTextInput] = useState(false);
+  const [originalText, setOriginalText] = useState<string | null>(null);
 
   useEffect(() => {
-    // Fetch all images for this receipt
+    // Fetch receipt metadata to check if it's a text input
+    const fetchReceiptMetadata = async () => {
+      try {
+        const url = `${apiUrl}/receipts/${uploadData.receipt_id}`;
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.source === 'text_input' && data.original_text) {
+            setIsTextInput(true);
+            setOriginalText(data.original_text);
+            setLoadingImages(false);
+            return;
+          }
+        }
+      } catch (error) {
+        console.error('❌ Error fetching receipt metadata:', error);
+      }
+
+      // If not text input, fetch images
+      fetchImages();
+    };
+
     const fetchImages = async () => {
       setLoadingImages(true);
       try {
@@ -339,7 +362,7 @@ export default function ReceiptConfirmation({
       }
     };
 
-    fetchImages();
+    fetchReceiptMetadata();
   }, [uploadData.receipt_id, apiUrl]);
 
   return (
@@ -372,13 +395,13 @@ export default function ReceiptConfirmation({
 
       {/* Split Screen: Receipt Image & Extracted Data */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left Side: Receipt Images */}
+        {/* Left Side: Receipt Images or Text Input */}
         <div className="bg-white rounded-xl shadow-sm p-6 sticky top-6 self-start">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-              📄 Receipt Images {imageUrls.length > 1 && `(${currentImageIndex + 1}/${imageUrls.length})`}
+              {isTextInput ? '✍️ Original Text' : `📄 Receipt Images ${imageUrls.length > 1 ? `(${currentImageIndex + 1}/${imageUrls.length})` : ''}`}
             </h3>
-            {imageUrls.length > 1 && (
+            {!isTextInput && imageUrls.length > 1 && (
               <div className="flex space-x-2">
                 <button
                   onClick={() => setCurrentImageIndex(prev => Math.max(0, prev - 1))}
@@ -408,7 +431,16 @@ export default function ReceiptConfirmation({
             <div className="border-2 border-gray-200 rounded-lg p-12">
               <div className="flex items-center justify-center">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-                <p className="ml-4 text-gray-600">Loading images...</p>
+                <p className="ml-4 text-gray-600">Loading...</p>
+              </div>
+            </div>
+          ) : isTextInput && originalText ? (
+            <div className="border-2 border-gray-200 rounded-lg p-6 bg-gradient-to-br from-blue-50 to-purple-50">
+              <div className="mb-2 text-xs text-gray-500 uppercase tracking-wide font-semibold">
+                Your Input
+              </div>
+              <div className="text-gray-800 text-lg font-medium leading-relaxed">
+                "{originalText}"
               </div>
             </div>
           ) : imageUrls.length > 0 ? (
@@ -536,7 +568,7 @@ export default function ReceiptConfirmation({
               {receipt.line_items.map((item, index) => (
                 <div
                   key={index}
-                  className="grid grid-cols-12 gap-3 items-start p-3 bg-gray-50 rounded-lg"
+                  className="grid grid-cols-12 gap-3 items-center p-3 bg-gray-50 rounded-lg"
                 >
                   <div className="col-span-12 md:col-span-4">
                     <input
@@ -573,7 +605,7 @@ export default function ReceiptConfirmation({
                       }
                       step="0.01"
                       placeholder="Qty"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 tabular-nums"
                     />
                   </div>
                   <div className="col-span-6 md:col-span-2">
@@ -585,11 +617,11 @@ export default function ReceiptConfirmation({
                       }
                       step="0.01"
                       placeholder="Unit $"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 tabular-nums"
                     />
                   </div>
-                  <div className="col-span-4 md:col-span-1 flex items-center justify-center">
-                    <span className="text-sm font-semibold text-gray-700">
+                  <div className="col-span-4 md:col-span-1 flex items-center justify-end pr-2">
+                    <span className="text-sm font-semibold text-gray-700 tabular-nums">
                       ${item.price.toFixed(2)}
                     </span>
                   </div>
@@ -619,23 +651,25 @@ export default function ReceiptConfirmation({
             </div>
 
             {/* Total */}
-            <div className="border-t pt-4 flex justify-end">
-              <div className="space-y-2 w-full md:w-1/3">
-                <div className="flex justify-between text-gray-700">
-                  <span>Subtotal:</span>
-                  <span className="font-semibold">${calculateTotal().toFixed(2)}</span>
-                </div>
-                {receipt.total_amounts.tax && (
-                  <div className="flex justify-between text-gray-700">
-                    <span>Tax:</span>
-                    <span className="font-semibold">
-                      ${receipt.total_amounts.tax.toFixed(2)}
-                    </span>
+            <div className="border-t pt-4">
+              <div className="flex justify-end">
+                <div className="space-y-3 min-w-[280px]">
+                  <div className="flex justify-between items-center text-gray-700">
+                    <span className="text-sm">Subtotal:</span>
+                    <span className="font-semibold text-base tabular-nums">${calculateTotal().toFixed(2)}</span>
                   </div>
-                )}
-                <div className="flex justify-between text-lg font-bold text-gray-900 border-t pt-2">
-                  <span>Total:</span>
-                  <span>${receipt.total_amounts.total.toFixed(2)}</span>
+                  {receipt.total_amounts.tax && (
+                    <div className="flex justify-between items-center text-gray-700">
+                      <span className="text-sm">Tax:</span>
+                      <span className="font-semibold text-base tabular-nums">
+                        ${receipt.total_amounts.tax.toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center text-lg font-bold text-gray-900 border-t pt-3">
+                    <span>Total:</span>
+                    <span className="tabular-nums">${receipt.total_amounts.total.toFixed(2)}</span>
+                  </div>
                 </div>
               </div>
             </div>

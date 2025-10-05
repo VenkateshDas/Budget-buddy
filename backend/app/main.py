@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import get_settings
 from app.api.routes import receipts_router, analysis_router, budgets_router
 from app.api.routes.users import router as users_router
+from app.api.routes.sheets import router as sheets_router
 
 settings = get_settings()
 
@@ -34,6 +35,7 @@ app.include_router(receipts_router, prefix="/api")
 app.include_router(analysis_router, prefix="/api")
 app.include_router(budgets_router, prefix="/api")
 app.include_router(users_router, prefix="/api")
+app.include_router(sheets_router, prefix="/api")
 
 
 @app.get("/")

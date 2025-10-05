@@ -40,3 +40,5 @@ class UploadJobResponse(BaseModel):
     error: Optional[str] = None
     receipt_data: Optional[Dict[str, Any]] = None
     extraction_log: Optional[Dict[str, Any]] = None
+    is_saved: Optional[bool] = False  # True if already saved to Google Sheets
+    row_number: Optional[int] = None  # Row number in Google Sheets if saved

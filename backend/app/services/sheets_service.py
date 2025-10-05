@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from app.models.receipt import Receipt
 from app.models.analysis import Budget, Goal, Category, GoalTransaction
+from app.models.income import Income
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -409,6 +410,66 @@ class SheetsService:
         except Exception as e:
             print(f"Error reading from Google Sheets: {e}")
             return []
+
+    def get_recent_receipts(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get recent receipts from Google Sheets
+
+        Args:
+            limit: Maximum number of receipts to return
+
+        Returns:
+            List of recent receipt dictionaries with row numbers
+        """
+        try:
+            worksheet = self.spreadsheet.worksheet("Receipts")
+            all_values = worksheet.get_all_values()
+
+            if len(all_values) <= 1:  # Only header or empty
+                return []
+
+            # Get headers and data rows
+            headers = all_values[0]
+            data_rows = all_values[1:]
+
+            # Convert to dictionaries with row numbers (starting from 2, since row 1 is header)
+            receipts = []
+            for idx, row in enumerate(reversed(data_rows), start=2):  # Most recent first
+                if len(row) >= len(headers):
+                    receipt = dict(zip(headers, row))
+                    receipt['_row_number'] = len(data_rows) - idx + 2  # Actual row in sheet
+                    receipts.append(receipt)
+
+                    if len(receipts) >= limit:
+                        break
+
+            return receipts
+        except Exception as e:
+            print(f"Error reading recent receipts from Google Sheets: {e}")
+            return []
+
+    def delete_receipt_by_row(self, row_number: int) -> bool:
+        """
+        Delete a receipt by its row number
+
+        Args:
+            row_number: Row number in the sheet (1-indexed, row 1 is header)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if row_number <= 1:
+                print(f"❌ Invalid row number {row_number}. Cannot delete header row.")
+                return False
+
+            worksheet = self.spreadsheet.worksheet("Receipts")
+            worksheet.delete_rows(row_number)
+            print(f"✅ Deleted row {row_number} from Receipts sheet")
+            return True
+        except Exception as e:
+            print(f"❌ Error deleting receipt row {row_number}: {e}")
+            return False
 
     def save_budget(self, budget: Budget) -> bool:
         """Save or update budget"""

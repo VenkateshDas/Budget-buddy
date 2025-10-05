@@ -300,6 +300,87 @@ async def upload_receipt(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
+@router.post("/text-to-expense", response_model=ReceiptUploadResponse)
+async def text_to_expense(
+    data: dict,
+    user: TypingOptional[dict] = Depends(get_current_user_optional)
+):
+    """
+    Extract expense from natural language text
+
+    Args:
+        data: {"text": "Spent $45 on groceries yesterday"}
+
+    Returns:
+        ReceiptUploadResponse with extracted data
+
+    Examples:
+        - "Bought coffee for $5.50 at Starbucks this morning"
+        - "Uber ride home $23.45 last night"
+        - "Movie tickets $30, popcorn $8 at AMC yesterday"
+    """
+    try:
+        text = data.get("text", "").strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="Text is required")
+
+        print(f"✍️ Text-to-expense request: {text[:100]}...")
+
+        # Generate unique receipt ID
+        receipt_id = str(uuid.uuid4())
+
+        # Get user categories if authenticated
+        custom_categories = None
+        if user:
+            print(f"👤 User authenticated: {user.get('id')}")
+            try:
+                supabase = SupabaseService()
+                categories = supabase.get_user_categories(user["id"])
+                custom_categories = [cat["name"] for cat in categories] if categories else None
+                print(f"📋 Using {len(categories) if categories else 0} custom categories")
+            except Exception as e:
+                print(f"⚠️ Failed to fetch user categories: {e}")
+
+        # Extract expense using Gemini
+        gemini = get_gemini_service()
+        receipt, extraction_log = gemini.extract_expense_from_text(
+            text,
+            custom_categories=custom_categories
+        )
+
+        if not receipt:
+            print(f"❌ Extraction failed: {extraction_log.get('error')}")
+            raise HTTPException(
+                status_code=422,
+                detail=f"Failed to extract expense: {extraction_log.get('error')}"
+            )
+
+        # Store receipt temporarily
+        receipts_storage[receipt_id] = {
+            "receipt": receipt,
+            "file_path": None,  # No file for text input
+            "extraction_log": extraction_log,
+            "source": "text_input",
+            "original_text": text
+        }
+        print(f"💾 Receipt stored temporarily with ID: {receipt_id}")
+
+        return ReceiptUploadResponse(
+            receipt_id=receipt_id,
+            receipt=receipt,
+            extraction_log=extraction_log,
+            confidence=0.90 if extraction_log.get("success") else 0.0
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Text-to-expense error: {type(e).__name__}: {str(e)}")
+        import traceback
+        print(f"🔍 Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
 @router.get("/{receipt_id}/check-duplicates")
 async def check_duplicates(receipt_id: str):
     """
@@ -514,12 +595,13 @@ async def reprocess_receipt(receipt_id: str, request: ReceiptReprocessRequest):
 
 @router.get("/", response_model=list[UploadJobResponse])
 async def list_all_receipts():
-    """Get all receipts (both pending and completed)"""
-    all_receipts = []
+    """Get all receipts (pending uploads and recent saved receipts)"""
+    in_queue_receipts = []
+    saved_receipts = []
 
-    # Get all async jobs
+    # Get all async jobs (pending/processing) - these are in queue
     for receipt_id, job in upload_service.jobs.items():
-        all_receipts.append(UploadJobResponse(
+        in_queue_receipts.append(UploadJobResponse(
             job_id=job.job_id,
             receipt_id=job.receipt_id,
             status=job.status,
@@ -529,9 +611,9 @@ async def list_all_receipts():
             extraction_log=job.extraction_log,
         ))
 
-    # Get all synchronous receipts
+    # Get all synchronous receipts (completed but not yet confirmed) - these are in queue
     for receipt_id, receipt_data in receipts_storage.items():
-        all_receipts.append(UploadJobResponse(
+        in_queue_receipts.append(UploadJobResponse(
             job_id=receipt_id,
             receipt_id=receipt_id,
             status=UploadStatus.COMPLETED,
@@ -540,10 +622,42 @@ async def list_all_receipts():
             extraction_log=receipt_data["extraction_log"],
         ))
 
-    # Sort by most recent first (assuming receipt_id has timestamp component)
-    all_receipts.reverse()
+    # Reverse in-queue receipts so most recent are first
+    in_queue_receipts.reverse()
 
-    return all_receipts
+    # Get recent saved receipts from Google Sheets (already in reverse chronological order)
+    try:
+        sheets = get_sheets_service()
+        recent_saved = sheets.get_recent_receipts(limit=10)
+
+        for saved_receipt in recent_saved:
+            # Convert saved receipt to UploadJobResponse format
+            saved_receipts.append(UploadJobResponse(
+                job_id=f"saved_{saved_receipt.get('_row_number', 0)}",
+                receipt_id=f"saved_{saved_receipt.get('_row_number', 0)}",
+                status=UploadStatus.COMPLETED,
+                progress=100,
+                receipt_data={
+                    "merchant_details": {
+                        "name": saved_receipt.get("Merchant", "Unknown"),
+                        "address": ""
+                    },
+                    "purchase_date": saved_receipt.get("Date", ""),
+                    "total_amounts": {
+                        "total": float(saved_receipt.get("Amount", 0)) if saved_receipt.get("Amount") else 0,
+                        "payment_method": saved_receipt.get("Payment Method", "")
+                    },
+                    "line_items": []
+                },
+                extraction_log={"success": True, "saved": True},
+                is_saved=True,
+                row_number=saved_receipt.get('_row_number')
+            ))
+    except Exception as e:
+        print(f"⚠️ Failed to fetch saved receipts: {e}")
+
+    # Return in-queue receipts first, then saved receipts
+    return in_queue_receipts + saved_receipts
 
 
 @router.get("/{receipt_id}/status", response_model=UploadJobResponse)
@@ -587,6 +701,7 @@ async def get_receipt(receipt_id: str):
             "receipt_id": receipt_id,
             "receipt": job.receipt_data,
             "extraction_log": job.extraction_log,
+            "source": "upload",
         }
 
     # Check synchronous storage
@@ -598,6 +713,8 @@ async def get_receipt(receipt_id: str):
         "receipt_id": receipt_id,
         "receipt": receipt_data["receipt"],
         "extraction_log": receipt_data["extraction_log"],
+        "source": receipt_data.get("source", "upload"),
+        "original_text": receipt_data.get("original_text"),
     }
 
 
@@ -811,3 +928,70 @@ async def get_receipt_image(receipt_id: str):
         raise HTTPException(status_code=404, detail="Receipt image not found")
 
     return FileResponse(file_path, media_type=media_type)
+
+
+@router.delete("/{receipt_id}")
+async def delete_receipt(receipt_id: str):
+    """
+    Delete a receipt from transaction history
+
+    For saved receipts (ID starts with 'saved_'), deletes from Google Sheets
+    For pending receipts, removes from upload jobs
+    """
+    try:
+        # Check if it's a saved receipt
+        if receipt_id.startswith("saved_"):
+            # Extract row number
+            try:
+                row_number = int(receipt_id.replace("saved_", ""))
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid saved receipt ID")
+
+            # Delete from Google Sheets
+            sheets = get_sheets_service()
+            success = sheets.delete_receipt_by_row(row_number)
+
+            if not success:
+                raise HTTPException(status_code=500, detail="Failed to delete receipt from Google Sheets")
+
+            return JSONResponse(content={
+                "success": True,
+                "message": "Receipt deleted successfully from Google Sheets"
+            })
+        else:
+            # Delete from upload jobs or receipts storage
+            if receipt_id in upload_service.jobs:
+                upload_service.delete_job(receipt_id)
+                return JSONResponse(content={
+                    "success": True,
+                    "message": "Receipt deleted from upload queue"
+                })
+            elif receipt_id in receipts_storage:
+                # Get file path before deleting
+                file_path = receipts_storage[receipt_id].get("file_path")
+                receipts_storage.pop(receipt_id, None)
+
+                # Delete file if exists
+                if file_path:
+                    try:
+                        if isinstance(file_path, list):
+                            for fp in file_path:
+                                if os.path.exists(fp):
+                                    os.remove(fp)
+                        elif os.path.exists(file_path):
+                            os.remove(file_path)
+                    except Exception as e:
+                        print(f"⚠️ Failed to delete file: {e}")
+
+                return JSONResponse(content={
+                    "success": True,
+                    "message": "Receipt deleted from temporary storage"
+                })
+            else:
+                raise HTTPException(status_code=404, detail="Receipt not found")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error deleting receipt: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")

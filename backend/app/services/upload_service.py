@@ -84,17 +84,36 @@ class UploadService:
             print(f"📋 Using custom categories from job: {custom_categories}")
 
             # Check if multiple files
-            if hasattr(job, 'all_file_paths') and len(job.all_file_paths) > 1:
-                print(f"📄 Processing {len(job.all_file_paths)} files")
-                receipt, extraction_log = self.gemini_service.extract_receipt_data_multiple(
-                    job.all_file_paths,
-                    custom_categories=custom_categories
+            try:
+                # Run blocking Gemini calls in thread pool to avoid blocking event loop
+                loop = asyncio.get_event_loop()
+
+                if hasattr(job, 'all_file_paths') and len(job.all_file_paths) > 1:
+                    print(f"📄 Processing {len(job.all_file_paths)} files")
+                    receipt, extraction_log = await loop.run_in_executor(
+                        None,
+                        lambda: self.gemini_service.extract_receipt_data_multiple(
+                            job.all_file_paths,
+                            custom_categories=custom_categories
+                        )
+                    )
+                else:
+                    receipt, extraction_log = await loop.run_in_executor(
+                        None,
+                        lambda: self.gemini_service.extract_receipt_data(
+                            job.file_path,
+                            custom_categories=custom_categories
+                        )
+                    )
+            except Exception as gemini_error:
+                print(f"❌ Gemini extraction error: {gemini_error}")
+                import traceback
+                traceback.print_exc()
+                error_msg = f"Gemini extraction failed: {str(gemini_error)}"
+                self.update_job_status(
+                    receipt_id, UploadStatus.FAILED, progress=100, error=error_msg
                 )
-            else:
-                receipt, extraction_log = self.gemini_service.extract_receipt_data(
-                    job.file_path,
-                    custom_categories=custom_categories
-                )
+                return
 
             if not receipt:
                 error_msg = extraction_log.get("error", "Failed to extract receipt data")
