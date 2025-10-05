@@ -1,0 +1,181 @@
+Budget Buddy - Complete Project Structure
+=========================================
+
+📦 budget_buddy/
+├── 📄 README.md                          # Comprehensive feature documentation
+├── 📄 SETUP.md                           # Quick setup guide with troubleshooting
+├── 📄 IMPLEMENTATION_SUMMARY.md          # Technical deep dive
+├── 📄 PROJECT_STATUS.md                  # Current project status
+├── 📄 PROJECT_TREE.txt                   # This file
+├── 📄 .gitignore                         # Git ignore rules
+├── 🔧 start.sh                           # Quick start script
+├── 📄 receipt_processor_cli.py           # Original CLI (reference)
+│
+├── 🔙 backend/                           # FastAPI Backend
+│   ├── 📁 app/
+│   │   ├── 🚀 main.py                    # FastAPI application entry point
+│   │   │
+│   │   ├── 📁 models/                    # Pydantic Data Models
+│   │   │   ├── __init__.py
+│   │   │   ├── receipt.py                # Receipt, LineItem, MerchantDetails
+│   │   │   └── analysis.py               # Budget, Goal, Category, Analytics
+│   │   │
+│   │   ├── 📁 services/                  # Business Logic Layer
+│   │   │   ├── __init__.py
+│   │   │   ├── gemini_service.py         # AI extraction with Gemini
+│   │   │   ├── sheets_service.py         # Google Sheets CRUD operations
+│   │   │   └── analysis_service.py       # Trends, forecasts, insights
+│   │   │
+│   │   ├── 📁 api/                       # API Routes
+│   │   │   ├── __init__.py
+│   │   │   └── 📁 routes/
+│   │   │       ├── __init__.py
+│   │   │       ├── receipts.py           # Upload, confirm, reprocess
+│   │   │       ├── analysis.py           # Trends, forecast, categorization
+│   │   │       └── budgets.py            # Budgets, goals, categories CRUD
+│   │   │
+│   │   └── 📁 core/                      # Configuration
+│   │       ├── __init__.py
+│   │       └── config.py                 # Settings, environment variables
+│   │
+│   ├── 📄 requirements.txt               # Python dependencies
+│   ├── 📄 .env.example                   # Environment template
+│   └── 📁 uploads/                       # Temporary file storage (gitignored)
+│
+├── 🎨 frontend/                          # Next.js 14 Frontend
+│   ├── 📁 app/                           # Next.js App Router
+│   │   ├── layout.tsx                    # Root layout with navigation
+│   │   ├── page.tsx                      # Home page (upload interface)
+│   │   ├── globals.css                   # Global Tailwind styles
+│   │   │
+│   │   ├── 📁 insights/                  # Insights Dashboard
+│   │   │   └── page.tsx                  # Charts, trends, forecasts
+│   │   │
+│   │   └── 📁 budgets/                   # Budgets & Goals
+│   │       └── page.tsx                  # Budget manager + goal tracker
+│   │
+│   ├── 📁 components/                    # React Components
+│   │   ├── ReceiptUpload.tsx             # Drag-drop file upload
+│   │   ├── ReceiptConfirmation.tsx       # Review & edit interface
+│   │   ├── ExtractionChatSidebar.tsx     # AI chat sidebar with logs
+│   │   ├── TrendCharts.tsx               # Recharts visualizations
+│   │   ├── BudgetManager.tsx             # Budget CRUD & status
+│   │   └── GoalsTracker.tsx              # Goal management & progress
+│   │
+│   ├── 📁 lib/                           # Utilities
+│   │   ├── api.ts                        # Axios API client
+│   │   └── types.ts                      # TypeScript interfaces
+│   │
+│   ├── 📁 public/                        # Static assets
+│   ├── 📄 package.json                   # Node dependencies
+│   ├── 📄 package-lock.json              # Lockfile
+│   ├── 📄 tsconfig.json                  # TypeScript config
+│   ├── 📄 next.config.js                 # Next.js config
+│   ├── 📄 tailwind.config.js             # Tailwind config
+│   ├── 📄 postcss.config.js              # PostCSS config
+│   └── 📄 .env.example                   # Environment template
+│
+└── 📁 data/                              # Sample receipt images (for testing)
+    └── 📁 file_handler/
+        ├── invoice_1.pdf
+        ├── receipt_6.jpg
+        ├── receipt_7.jpg
+        └── ...
+
+Key Features by File:
+=====================
+
+Backend Services:
+  gemini_service.py     → AI extraction, categorization, reprocessing
+  sheets_service.py     → Save/read receipts, budgets, goals from Sheets
+  analysis_service.py   → Calculate trends, forecasts, category breakdowns
+
+Frontend Components:
+  ReceiptUpload.tsx           → Drag-drop, validation, upload progress
+  ReceiptConfirmation.tsx     → Editable fields, add/remove items, totals
+  ExtractionChatSidebar.tsx   → AI logs, feedback, reprocess button
+  TrendCharts.tsx             → Line/bar/pie charts with Recharts
+  BudgetManager.tsx           → Budget cards with progress bars
+  GoalsTracker.tsx            → Goal cards with deadlines and progress
+
+API Endpoints Summary:
+=====================
+
+Receipts:
+  POST   /api/receipts/upload            → Upload & extract
+  PUT    /api/receipts/{id}/confirm      → Save confirmed data
+  POST   /api/receipts/{id}/reprocess    → Reprocess with feedback
+  GET    /api/receipts/{id}              → Get receipt by ID
+
+Analysis:
+  GET    /api/analysis/trends            → Spending trends (monthly/weekly)
+  GET    /api/analysis/forecast          → Next month prediction
+  GET    /api/analysis/categorization    → Category breakdown
+  GET    /api/analysis/budget-status     → Budget vs spending
+
+Budgets & Goals:
+  GET    /api/budgets                    → List budgets
+  POST   /api/budgets                    → Create budget
+  PUT    /api/budgets/{id}               → Update budget
+  DELETE /api/budgets/{id}               → Delete budget
+  GET    /api/budgets/goals              → List goals
+  POST   /api/budgets/goals              → Create goal
+  PUT    /api/budgets/goals/{id}         → Update goal
+  DELETE /api/budgets/goals/{id}         → Delete goal
+  GET    /api/budgets/categories         → List categories
+  POST   /api/budgets/categories         → Create category
+
+Tech Stack:
+===========
+
+Backend:
+  • FastAPI 0.115.5
+  • Python 3.9+
+  • Google Gemini AI (gemini-2.0-flash)
+  • Google Sheets API (gspread)
+  • Pydantic 2.10.3
+  • Uvicorn 0.34.0
+
+Frontend:
+  • Next.js 14.2.33
+  • React 18.3.1
+  • TypeScript 5.9.3
+  • Tailwind CSS 4.1.14
+  • Recharts 3.2.1
+  • Axios 1.12.2
+  • React Hot Toast 2.6.0
+  • React Dropzone 14.3.8
+
+Storage:
+  • Google Sheets (MVP)
+  • Future: PostgreSQL/MongoDB
+
+Quick Start:
+============
+
+1. Setup Google Cloud:
+   - Get Gemini API key
+   - Enable Sheets API
+   - Create service account
+   - Share Google Sheet
+
+2. Configure Backend:
+   cd backend
+   python -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+   cp .env.example .env
+   # Edit .env with your keys
+
+3. Configure Frontend:
+   cd frontend
+   npm install
+   cp .env.example .env.local
+
+4. Start Everything:
+   ./start.sh
+
+5. Open Browser:
+   http://localhost:3000
+
+Status: ✅ 100% COMPLETE & READY FOR DEPLOYMENT
